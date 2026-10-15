@@ -1,0 +1,4 @@
+# java / Maven
+target/
+*.class
+*.jar
