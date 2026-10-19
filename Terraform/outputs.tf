@@ -14,12 +14,12 @@ output "svr_backend_globomatic_private_ip" {
   value       = aws_instance.svr_backend_globomatic.private_ip
 }
 
-# output "svr_frontend_globomatic_id" {
-#   description = "ID de la instancia EC2 Frontend"
-#   value       = aws_instance.svr_frontend_globomatic.id
-# }
+output "svr_frontend_globomatic_id" {
+  description = "ID de la instancia EC2 Frontend"
+  value       = aws_instance.svr_frontend_globomatic.id
+}
 
-# output "svr_frontend_globomatic_public_ip" {
-#   description = "IP publica de la instancia EC2 Frontend"
-#   value       = aws_instance.svr_frontend_globomatic.public_ip # CORREGIDO
-# }
+output "svr_frontend_globomatic_public_ip" {
+  description = "IP publica de la instancia EC2 Frontend"
+  value       = aws_instance.svr_frontend_globomatic.public_ip
+}

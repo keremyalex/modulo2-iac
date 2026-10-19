@@ -2,8 +2,12 @@
 .terraform/
 *.tfstate
 *.tfstate.*
+.terraform.tfstate.lock.info
 crash.log
 crash.*.log
+
+# Plan files
+*.tfplan
 
 # Variables sensibles
 *.tfvars

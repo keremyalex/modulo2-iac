@@ -9,3 +9,9 @@ variable "key_name" {
   type        = string
   default     = "pk-lab2-ecommerce"
 }
+
+variable "ssh_cidr" {
+  description = "CIDR desde el cual se permite SSH de administracion al frontend y backend"
+  type        = string
+  default     = "168.228.132.62/32"
+}
