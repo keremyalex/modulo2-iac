@@ -1,114 +1,64 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Template para provisionar 2 servidores (Backend y Frontend) con IP publica.
+Description: Root template Globomatics - orquesta los stacks anidados de red, backend y frontend.
 
 Parameters:
   KeyName:
     Description: Nombre del Key Pair existente en AWS para acceder por SSH
     Type: AWS::EC2::KeyPair::KeyName
     Default: llave-diplomado
+  SSHLocation:
+    Description: CIDR autorizado para acceso SSH (ej. 203.0.113.10/32)
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    ConstraintDescription: Debe ser un rango CIDR valido (ej. 203.0.113.10/32)
+  InstanceType:
+    Description: Tipo de instancia EC2 para Backend y Frontend
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro, t3.small, t3.medium]
 
 Resources:
-  MyVPC:
-    Type: AWS::EC2::VPC
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
     Properties:
-      CidrBlock: 10.0.0.0/16
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
-      Tags:
-        - Key: Name
-          Value: Globomatics-VPC
+      TemplateURL: ./templates/network.yaml
+      Parameters:
+        SSHLocation: !Ref SSHLocation
 
-  PublicSubnet:
-    Type: AWS::EC2::Subnet
+  BackendStack:
+    Type: AWS::CloudFormation::Stack
     Properties:
-      VpcId: !Ref MyVPC
-      CidrBlock: 10.0.1.0/24
-      MapPublicIpOnLaunch: true
-      AvailabilityZone: !Select [0, !GetAZs '']
-      Tags:
-        - Key: Name
-          Value: Globomatics-Public-Subnet
+      TemplateURL: ./templates/backend.yaml
+      Parameters:
+        KeyName: !Ref KeyName
+        InstanceType: !Ref InstanceType
+        SubnetId: !GetAtt NetworkStack.Outputs.PublicSubnetId
+        SecurityGroupId: !GetAtt NetworkStack.Outputs.WebSecurityGroupId
 
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
+  FrontendStack:
+    Type: AWS::CloudFormation::Stack
     Properties:
-      Tags:
-        - Key: Name
-          Value: Globomatics-IGW
-
-  VPCGatewayAttachment:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId: !Ref MyVPC
-      InternetGatewayId: !Ref InternetGateway
-
-  PublicRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref MyVPC
-      Tags:
-        - Key: Name
-          Value: Globomatics-Public-RT
-
-  PublicRoute:
-    Type: AWS::EC2::Route
-    DependsOn: VPCGatewayAttachment
-    Properties:
-      RouteTableId: !Ref PublicRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref InternetGateway
-
-  SubnetRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet
-      RouteTableId: !Ref PublicRouteTable
-
-  WebSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Permitir HTTP y SSH
-      VpcId: !Ref MyVPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: 0.0.0.0/0
-
-  BackendServer:
-    Type: AWS::EC2::Instance
-    Properties:
-      InstanceType: t3.micro
-      KeyName: !Ref KeyName
-      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
-      SubnetId: !Ref PublicSubnet
-      SecurityGroupIds:
-        - !Ref WebSecurityGroup
-      Tags:
-        - Key: Name
-          Value: Globomatics-Backend
-
-  FrontendServer:
-    Type: AWS::EC2::Instance
-    Properties:
-      InstanceType: t3.micro
-      KeyName: !Ref KeyName
-      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
-      SubnetId: !Ref PublicSubnet
-      SecurityGroupIds:
-        - !Ref WebSecurityGroup
-      Tags:
-        - Key: Name
-          Value: Globomatics-Frontend
+      TemplateURL: ./templates/frontend.yaml
+      Parameters:
+        KeyName: !Ref KeyName
+        InstanceType: !Ref InstanceType
+        SubnetId: !GetAtt NetworkStack.Outputs.PublicSubnetId
+        SecurityGroupId: !GetAtt NetworkStack.Outputs.WebSecurityGroupId
 
 Outputs:
+  VpcId:
+    Description: ID de la VPC
+    Value: !GetAtt NetworkStack.Outputs.VpcId
   BackendPublicIP:
     Description: IP Publica del servidor Backend
-    Value: !GetAtt BackendServer.PublicIp
+    Value: !GetAtt BackendStack.Outputs.PublicIp
   FrontendPublicIP:
     Description: IP Publica del servidor Frontend
-    Value: !GetAtt FrontendServer.PublicIp
+    Value: !GetAtt FrontendStack.Outputs.PublicIp
+  BackendInstanceId:
+    Description: ID de la instancia Backend
+    Value: !GetAtt BackendStack.Outputs.InstanceId
+  FrontendInstanceId:
+    Description: ID de la instancia Frontend
+    Value: !GetAtt FrontendStack.Outputs.InstanceId

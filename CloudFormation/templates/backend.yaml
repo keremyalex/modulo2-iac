@@ -1,0 +1,41 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Servidor Backend de Globomatics (EC2).
+
+Parameters:
+  KeyName:
+    Description: Nombre del Key Pair existente en AWS para acceder por SSH
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: llave-diplomado
+  InstanceType:
+    Description: Tipo de instancia EC2
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro, t3.small, t3.medium]
+  SubnetId:
+    Description: ID de la subred donde se lanza la instancia
+    Type: AWS::EC2::Subnet::Id
+  SecurityGroupId:
+    Description: ID del Security Group aplicado a la instancia
+    Type: AWS::EC2::SecurityGroup::Id
+
+Resources:
+  BackendServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref SecurityGroupId
+      Tags:
+        - Key: Name
+          Value: Globomatics-Backend
+
+Outputs:
+  PublicIp:
+    Description: IP Publica del servidor Backend
+    Value: !GetAtt BackendServer.PublicIp
+  InstanceId:
+    Description: ID de la instancia Backend
+    Value: !Ref BackendServer

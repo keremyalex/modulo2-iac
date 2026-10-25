@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Red Globomatics - VPC, subred publica, IGW, rutas y Security Group.
+
+Parameters:
+  VpcCidr:
+    Description: Bloque CIDR de la VPC
+    Type: String
+    Default: 10.0.0.0/16
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+  SubnetCidr:
+    Description: Bloque CIDR de la subred publica
+    Type: String
+    Default: 10.0.1.0/24
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+  SSHLocation:
+    Description: CIDR autorizado para acceso SSH (ej. 203.0.113.10/32)
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    ConstraintDescription: Debe ser un rango CIDR valido (ej. 203.0.113.10/32)
+
+Resources:
+  MyVPC:
+    Type: AWS::EC2::VPC
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: Globomatics-VPC
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Ref SubnetCidr
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: Globomatics-Public-Subnet
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Globomatics-IGW
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: Globomatics-Public-RT
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupDescription: Permitir HTTP (80) y SSH (22) restringido por SSHLocation
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+
+Outputs:
+  VpcId:
+    Description: ID de la VPC
+    Value: !Ref MyVPC
+    Export:
+      Name: Globomatics-VpcId
+  PublicSubnetId:
+    Description: ID de la subred publica
+    Value: !Ref PublicSubnet
+    Export:
+      Name: Globomatics-PublicSubnetId
+  WebSecurityGroupId:
+    Description: ID del Security Group web
+    Value: !Ref WebSecurityGroup
+    Export:
+      Name: Globomatics-WebSecurityGroupId
