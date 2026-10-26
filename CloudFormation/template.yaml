@@ -5,7 +5,7 @@ Parameters:
   KeyName:
     Description: Nombre del Key Pair existente en AWS para acceder por SSH
     Type: AWS::EC2::KeyPair::KeyName
-    Default: llave-diplomado
+    Default: pk-lab2-ecommerce
   SSHLocation:
     Description: CIDR autorizado para acceso SSH (ej. 203.0.113.10/32)
     Type: String

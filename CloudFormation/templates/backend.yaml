@@ -5,7 +5,7 @@ Parameters:
   KeyName:
     Description: Nombre del Key Pair existente en AWS para acceder por SSH
     Type: AWS::EC2::KeyPair::KeyName
-    Default: llave-diplomado
+    Default: pk-lab2-ecommerce
   InstanceType:
     Description: Tipo de instancia EC2
     Type: String

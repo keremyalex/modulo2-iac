@@ -53,7 +53,7 @@ jobs:
             --stack-name "$STACK_NAME" \
             --template-file packaged.yaml \
             --parameter-overrides \
-              KeyName="${{ vars.CF_KEY_NAME || 'llave-diplomado' }}" \
+              KeyName="${{ vars.CF_KEY_NAME || 'pk-lab2-ecommerce' }}" \
               SSHLocation="${{ secrets.CF_SSH_LOCATION }}" \
               InstanceType="${{ vars.CF_INSTANCE_TYPE || 't3.micro' }}" \
             --capabilities CAPABILITY_IAM \

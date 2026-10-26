@@ -35,7 +35,7 @@ SecurityGroupId: !GetAtt NetworkStack.Outputs.WebSecurityGroupId
 
 | Parámetro | Default | Descripción |
 |---|---|---|
-| `KeyName` | `llave-diplomado` | Key Pair existente en AWS para SSH (se usa en ambas instancias) |
+| `KeyName` | `pk-lab2-ecommerce` | Key Pair existente en AWS para SSH (se usa en ambas instancias) |
 | `SSHLocation` | `0.0.0.0/0` | CIDR autorizado para SSH. **Usa siempre tu IP**: `<tu-ip>/32` |
 | `InstanceType` | `t3.micro` | Tipo de instancia para Backend y Frontend (`t3.micro`/`t3.small`/`t3.medium`) |
 | `VpcCidr` (en `network.yaml`) | `10.0.0.0/16` | Bloque CIDR de la VPC |
@@ -63,7 +63,7 @@ aws cloudformation deploy \
   --stack-name globomatics \
   --template-file packaged.yaml \
   --parameter-overrides \
-       KeyName=llave-diplomado \
+       KeyName=pk-lab2-ecommerce \
        SSHLocation=<tu-ip>/32 \
        InstanceType=t3.micro
 ```
@@ -122,7 +122,7 @@ En **Settings → Secrets and variables → Actions**:
 | Variable | `CF_ARTIFACTS_BUCKET` | output `ArtifactBucketName` |
 | Variable | `AWS_REGION` | `sa-east-1` |
 | Variable | `CF_STACK_NAME` | `globomatics` |
-| Variable | `CF_KEY_NAME` | `llave-diplomado` |
+| Variable | `CF_KEY_NAME` | `pk-lab2-ecommerce` |
 | Variable | `CF_INSTANCE_TYPE` | `t3.micro` |
 
 ### 3. Primer despliegue
