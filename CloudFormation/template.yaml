@@ -36,6 +36,15 @@ Resources:
         SubnetId: !GetAtt NetworkStack.Outputs.PublicSubnetId
         SecurityGroupId: !GetAtt NetworkStack.Outputs.WebSecurityGroupId
 
+  FrontendStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./templates/frontend.yaml
+      Parameters:
+        KeyName: !Ref KeyName
+        InstanceType: !Ref InstanceType
+        SubnetId: !GetAtt NetworkStack.Outputs.PublicSubnetId
+        SecurityGroupId: !GetAtt NetworkStack.Outputs.WebSecurityGroupId
 
 Outputs:
   VpcId:
@@ -44,8 +53,12 @@ Outputs:
   BackendPublicIP:
     Description: IP Publica del servidor Backend
     Value: !GetAtt BackendStack.Outputs.PublicIp
-
+  FrontendPublicIP:
+    Description: IP Publica del servidor Frontend
+    Value: !GetAtt FrontendStack.Outputs.PublicIp
   BackendInstanceId:
     Description: ID de la instancia Backend
     Value: !GetAtt BackendStack.Outputs.InstanceId
-
+  FrontendInstanceId:
+    Description: ID de la instancia Frontend
+    Value: !GetAtt FrontendStack.Outputs.InstanceId
