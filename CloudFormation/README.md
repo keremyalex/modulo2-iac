@@ -1,17 +1,24 @@
 # Globomatics — Infraestructura con AWS CloudFormation
 
-Infraestructura como código para desplegar la red y los servidores de **Globomatics** usando **CloudFormation con stacks anidados** (nested stacks).
+Infraestructura como código (IaC) para desplegar la topología de red y los servidores de **Globomatics** utilizando **CloudFormation con stacks anidados** (nested stacks) y un pipeline automatizado de CI/CD mediante **GitHub Actions con autenticación OIDC**.
 
+---
 ## Estructura del proyecto
 
 ```
-CloudFormation/
-├── template.yaml          # Raíz: orquesta los 3 stacks anidados
-├── templates/
-│   ├── network.yaml       # Red: VPC, subred pública, IGW, rutas, Security Group
-│   ├── backend.yaml       # Instancia EC2 Backend
-│   └── frontend.yaml      # Instancia EC2 Frontend
-├── .gitignore             # Ignora *.pem y packaged.yaml
+.
+├── .github/
+│   └── workflows/
+│       └── deploy-cloudformation.yml  # Pipeline CI/CD automatizado
+├── CloudFormation/
+│   ├── template.yaml                  # Raíz: orquesta los 3 stacks anidados
+│   ├── templates/
+│   │   ├── network.yaml               # Red: VPC, subred pública, IGW, rutas, SG
+│   │   ├── backend.yaml               # Instancia EC2 Backend
+│   │   └── frontend.yaml              # Instancia EC2 Frontend
+│   ├── setup/
+│   │   └── oidc-role.yaml             # Bootstrap: bucket S3, OIDC provider y rol IAM
+│   └── .gitignore                     # Ignora *.pem y packaged.yaml
 └── README.md
 ```
 
