@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Bootstrap CI/CD - bucket de artefactos, proveedor OIDC de GitHub y rol IAM para desplegar desde GitHub Actions.
+
+Parameters:
+  GitHubRepo:
+    Description: Repositorio GitHub autorizado (owner/repo)
+    Type: String
+    Default: GalvanNelson/Globomatics
+    AllowedPattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
+    ConstraintDescription: Formato owner/repo
+  GitHubBranch:
+    Description: Rama autorizada para asumir el rol
+    Type: String
+    Default: main
+    AllowedPattern: '^[A-Za-z0-9_./-]+$'
+  ArtifactBucketName:
+    Description: Nombre global del bucket de artefactos (vacio = genera uno automatico)
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    ConstraintDescription: Minusculas, numeros, puntos y guiones (3-63 caracteres)
+  CreateOidcProvider:
+    Description: Crear el proveedor OIDC de GitHub (poner false si ya existe en la cuenta)
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+
+Conditions:
+  CreateProvider: !Equals [!Ref CreateOidcProvider, 'true']
+  HasBucketName: !Not [!Equals [!Ref ArtifactBucketName, '']]
+
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If [HasBucketName, !Ref ArtifactBucketName, !Ref AWS::NoValue]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Rol asumido por GitHub Actions para empaquetar y desplegar el stack globomatics
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubRepo}*:ref:refs/heads/${GitHubBranch}'
+      Policies:
+        - PolicyName: CloudFormationDeploy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudFormation
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:ValidateTemplate
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:ListStacks
+                  - cloudformation:ListStackResources
+                Resource: '*'
+              - Sid: ArtifactsBucket
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !GetAtt ArtifactBucket.Arn
+                  - !Sub ${ArtifactBucket.Arn}/*
+              - Sid: AmiDynamicReference
+                Effect: Allow
+                Action:
+                  - ssm:GetParameters
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:*:parameter/aws/service/ami-amazon-linux-latest/*
+              - Sid: Ec2Provision
+                Effect: Allow
+                Action:
+                  - ec2:*
+                Resource: '*'
+              - Sid: PassInstanceRole
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/globomatics-*
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ec2.amazonaws.com
+
+Outputs:
+  RoleArn:
+    Description: ARN del rol - copiarlo como secreto AWS_ROLE_ARN en GitHub
+    Value: !GetAtt DeployRole.Arn
+  ArtifactBucketName:
+    Description: Nombre del bucket de artefactos - copiarlo como variable CF_ARTIFACTS_BUCKET en GitHub
+    Value: !Ref ArtifactBucket
+  OidcProviderArn:
+    Description: ARN del proveedor OIDC de GitHub (solo si CreateOidcProvider=true)
+    Condition: CreateProvider
+    Value: !Ref GitHubOidcProvider

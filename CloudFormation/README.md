@@ -75,6 +75,65 @@ aws cloudformation describe-stacks --stack-name globomatics \
   --query 'Stacks[0].Outputs'
 ```
 
+## Despliegue automático (CI/CD con GitHub Actions)
+
+Al hacer `push` a `main` con cambios en `CloudFormation/**`, el workflow
+`.github/workflows/deploy-cloudformation.yml` empaqueta y despliega el stack solo.
+Usa **OIDC**: no hay claves de AWS en GitHub, solo un rol IAM de corta duración.
+
+```
+push a main (CloudFormation/**)
+  → checkout
+  → asume rol IAM vía OIDC (token de GitHub)
+  → aws cloudformation package  (sube templates/ al bucket de artefactos)
+  → aws cloudformation deploy   (crea/actualiza el stack globomatics)
+```
+
+### 1. Bootstrap (una sola vez, desde tu CLI con credenciales)
+
+```bash
+cd CloudFormation/
+
+aws cloudformation deploy \
+  --stack-name globomatics-oidc \
+  --template-file setup/oidc-role.yaml \
+  --capabilities CAPABILITY_IAM
+```
+
+Crea el bucket de artefactos, el proveedor OIDC de GitHub y el rol de despliegue.
+Parámetros opcionales: `GitHubRepo`, `GitHubBranch`, `ArtifactBucketName` y
+`CreateOidcProvider=false` si el proveedor OIDC ya existe en la cuenta.
+
+Luego copia los outputs:
+
+```bash
+aws cloudformation describe-stacks --stack-name globomatics-oidc \
+  --query 'Stacks[0].Outputs'
+```
+
+### 2. Variables y secretos en GitHub
+
+En **Settings → Secrets and variables → Actions**:
+
+| Tipo | Nombre | Ejemplo |
+|---|---|---|
+| Secret | `AWS_ROLE_ARN` | output `RoleArn` |
+| Secret | `CF_SSH_LOCATION` | `<tu-ip>/32` |
+| Variable | `CF_ARTIFACTS_BUCKET` | output `ArtifactBucketName` |
+| Variable | `AWS_REGION` | `sa-east-1` |
+| Variable | `CF_STACK_NAME` | `globomatics` |
+| Variable | `CF_KEY_NAME` | `llave-diplomado` |
+| Variable | `CF_INSTANCE_TYPE` | `t3.micro` |
+
+### 3. Primer despliegue
+
+Haz commit y push a `main` (o dispara el workflow con **Run workflow** desde la
+pestaña Actions). Si el stack no existe lo crea; si no hay cambios termina en
+no-op. Revisa el resultado en la pestaña **Actions** del repositorio.
+
+> Si cambias de IP, actualiza `CF_SSH_LOCATION`; si cambias el nombre del bucket
+> o el rol, actualiza `CF_ARTIFACTS_BUCKET` / `AWS_ROLE_ARN`.
+
 ## Políticas de retención
 
 - **Red (`network.yaml`)**: los 8 recursos tienen `DeletionPolicy: Retain` y `UpdateReplacePolicy: Retain`, por lo que **sobreviven al borrado del stack** (VPC, subred, IGW, rutas y SG no tienen costo fijo).

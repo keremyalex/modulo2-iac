@@ -1,0 +1,60 @@
+name: Deploy CloudFormation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'CloudFormation/**'
+      - '.github/workflows/deploy-cloudformation.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-cloudformation
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Package & Deploy
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'sa-east-1' }}
+      STACK_NAME: ${{ vars.CF_STACK_NAME || 'globomatics' }}
+      ARTIFACTS_BUCKET: ${{ vars.CF_ARTIFACTS_BUCKET }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configurar credenciales AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-globomatics-cfn
+
+      - name: Verificar identidad
+        run: aws sts get-caller-identity
+
+      - name: Empaquetar templates anidados
+        working-directory: CloudFormation
+        run: |
+          aws cloudformation package \
+            --template-file template.yaml \
+            --s3-bucket "$ARTIFACTS_BUCKET" \
+            --output-template-file packaged.yaml
+
+      - name: Desplegar stack
+        working-directory: CloudFormation
+        run: |
+          aws cloudformation deploy \
+            --stack-name "$STACK_NAME" \
+            --template-file packaged.yaml \
+            --parameter-overrides \
+              KeyName="${{ vars.CF_KEY_NAME || 'llave-diplomado' }}" \
+              SSHLocation="${{ secrets.CF_SSH_LOCATION }}" \
+              InstanceType="${{ vars.CF_INSTANCE_TYPE || 't3.micro' }}" \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset
