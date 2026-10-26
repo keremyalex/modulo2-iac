@@ -68,7 +68,11 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubRepo}*:ref:refs/heads/${GitHubBranch}'
+                token.actions.githubusercontent.com:sub: !Sub
+                  - 'repo:${Owner}*/${Name}*:ref:refs/heads/${Branch}'
+                  - Owner: !Select [0, !Split ['/', !Ref GitHubRepo]]
+                    Name: !Select [1, !Split ['/', !Ref GitHubRepo]]
+                    Branch: !Ref GitHubBranch
       Policies:
         - PolicyName: CloudFormationDeploy
           PolicyDocument:
