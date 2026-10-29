@@ -1,0 +1,83 @@
+#cloud-config
+package_update: true
+
+packages:
+  - git
+  - nginx
+  - nodejs22
+  - nodejs22-npm
+
+write_files:
+  - path: /etc/nginx/nginx.conf
+    permissions: '0644'
+    content: |
+      user nginx;
+      worker_processes auto;
+      error_log /var/log/nginx/error.log notice;
+      pid /run/nginx.pid;
+
+      events {
+          worker_connections 1024;
+      }
+
+      http {
+          include /etc/nginx/mime.types;
+          default_type application/octet-stream;
+          log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                          '$status $body_bytes_sent "$http_referer" '
+                          '"$http_user_agent" "$http_x_forwarded_for"';
+          access_log /var/log/nginx/access.log main;
+          sendfile on;
+          keepalive_timeout 65;
+
+          server {
+              listen 80 default_server;
+              listen [::]:80 default_server;
+              server_name _;
+              root /usr/share/nginx/html;
+              index index.html;
+
+              location / {
+                  try_files $uri $uri/ /index.html;
+              }
+
+              location /api/ {
+                  proxy_pass http://${backend_private_ip}:8080;
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+      }
+
+  - path: /usr/local/sbin/bootstrap-globomatics-frontend.sh
+    permissions: '0750'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      readonly REPOSITORY_URL='${repository_url}'
+      readonly REPOSITORY_BRANCH='${repository_branch}'
+      readonly SOURCE_DIR='/opt/globomatics-source'
+      readonly WEB_ROOT='/usr/share/nginx/html'
+
+      if [[ ! -d "$SOURCE_DIR/.git" ]]; then
+        rm -rf "$SOURCE_DIR"
+        git clone --depth 1 --branch "$REPOSITORY_BRANCH" "$REPOSITORY_URL" "$SOURCE_DIR"
+      fi
+
+      cd "$SOURCE_DIR/frontend"
+      npm ci
+      npm run build
+
+      rm -rf "$WEB_ROOT"/*
+      cp -a dist/. "$WEB_ROOT"/
+      chown -R nginx:nginx "$WEB_ROOT"
+
+      nginx -t
+      systemctl enable --now nginx
+
+runcmd:
+  - [bash, /usr/local/sbin/bootstrap-globomatics-frontend.sh]

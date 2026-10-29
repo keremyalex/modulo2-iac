@@ -1,100 +1,137 @@
-# Terraform — Infraestructura de Backend y Frontend (AWS)
+# Terraform/OpenTofu — Globomatics en AWS
 
-Infraestructura como código (IaC) con OpenTofu para levantar las instancias EC2 del backend y el frontend del Sistema de Control y Registro de Asistencia Estudiantil en AWS.
-
-**Stack:** OpenTofu ≥ 1.5 · Provider AWS `~> 6.0` · Estado remoto en S3 + lock en DynamoDB
-
----
+Infraestructura como código para crear dos instancias EC2 con Amazon Linux 2023 y configurarlas automáticamente mediante cloud-init.
 
 ## Arquitectura
 
-- **2 instancias EC2** `t3.micro` con Amazon Linux 2023 en la región `sa-east-1`:
-  - `backend-globomatic` — API del sistema
-  - `frontend-globomatic` — interfaz web
-- **Security Groups:**
-  - `backend-sg`: SSH (puerto 22) restringido a `var.ssh_cidr`; tráfico de salida abierto
-  - `frontend-sg`: SSH restringido a `var.ssh_cidr`, HTTP (80) y HTTPS (443) públicos
-- **Regla** `allow_frontend_to_backend`: permite al frontend llamar al backend en el puerto 8080
-- **IMDSv2 obligatorio** en ambas instancias (`http_tokens = "required"`)
-- **Estado remoto** en S3 (`globomatic-tfstate-estado`) con bloqueo de concurrentes en DynamoDB (`terraform-state-lock`)
+- `backend-globomatic` (`t3.micro` por defecto): PostgreSQL 16 nativo, Java 17, Maven y Spring Boot en el puerto 8080.
+- `frontend-globomatic` (`t3.micro` por defecto): Node.js 22 para compilar React y Nginx para servirlo por HTTP.
+- Nginx envía las solicitudes `/api` a la IP privada del backend.
+- PostgreSQL solo escucha en `localhost`; el puerto 5432 no se expone en AWS.
+- La contraseña de PostgreSQL se guarda como `SecureString` en Systems Manager Parameter Store.
+- El estado de OpenTofu se almacena en S3 y se bloquea mediante DynamoDB.
 
-## Estructura de archivos
+```text
+Internet
+   |
+   v
+Frontend EC2 :80 (Nginx + React)
+   |
+   | /api por la red privada
+   v
+Backend EC2 :8080 (Spring Boot)
+   |
+   v
+PostgreSQL :5432 (localhost)
+```
+
+## Estructura
 
 | Archivo | Contenido |
 |---|---|
-| `versions.tf` | Versión mínima de OpenTofu y proveedor AWS requerido |
-| `providers.tf` | Configuración del provider AWS y `default_tags` (`Project=globomatic`, `ManagedBy=opentofu`) |
-| `data.tf` | Data source para buscar la última AMI de Amazon Linux 2023 |
-| `security_groups.tf` | Security groups de backend y frontend + regla 8080 |
-| `compute.tf` | Instancias EC2 de backend y frontend |
-| `backend.tf` | Backend remoto S3 + DynamoDB para el estado |
-| `variables.tf` | Definición de variables |
-| `outputs.tf` | Outputs de las instancias |
-| `env.tf` | Credenciales AWS (ignorado por git, no se sube) |
+| `compute.tf` | EC2 y asignación de las plantillas cloud-init |
+| `cloud-init/backend.yaml.tftpl` | Instalación y configuración del backend y PostgreSQL |
+| `cloud-init/frontend.yaml.tftpl` | Compilación de React y configuración de Nginx |
+| `iam.tf` | Instance Role que permite al backend leer un único parámetro SSM |
+| `secrets.tf` | Contraseña de base de datos como parámetro `SecureString` |
+| `security_groups.tf` | SSH, HTTP/HTTPS y acceso frontend → backend:8080 |
+| `data.tf` | Última AMI de Amazon Linux 2023 |
+| `backend.tf` | Estado remoto S3 y lock en DynamoDB |
+| `variables.tf` | Región, tipos de instancia, repositorio y contraseña |
+| `outputs.tf` | IDs, IPs y URL pública de la aplicación |
 
 ## Requisitos
 
-- [OpenTofu](https://opentofu.org/) 1.5 o superior instalado
-- Key pair `pk-lab2-ecommerce` creado en la región `sa-east-1` (o cambiar `key_name` en `variables.tf`)
-- Bucket S3 `globomatic-tfstate-estado` y tabla DynamoDB `terraform-state-lock` ya creados en `sa-east-1`
-- Credenciales de un usuario IAM con permisos sobre ese bucket y tabla
+- OpenTofu 1.5 o superior.
+- Credenciales AWS configuradas mediante AWS CLI, variables de entorno o un perfil.
+- Key pair `pk-lab2-ecommerce` en `sa-east-1`, o cambiar `key_name`.
+- Bucket `globomatic-tfstate-estado` con versionado y cifrado habilitados.
+- Tabla DynamoDB `terraform-state-lock` con partition key `LockID` de tipo String.
+- La rama indicada por `repository_branch` debe existir en GitHub y el repositorio debe ser accesible por HTTPS.
 
-## Configuración de credenciales
+La rama por defecto es `practico07`. Antes del primer despliegue, publícala:
 
-El backend remoto y el provider toman las credenciales de la cadena estándar de AWS. Exportalas en tu shell:
-
-```bash
-export AWS_ACCESS_KEY_ID=<tu-access-key>
-export AWS_SECRET_ACCESS_KEY=<tu-secret-key>
-export AWS_DEFAULT_REGION=sa-east-1
+```powershell
+git push -u origin practico07
 ```
 
-> **Nota:** `env.tf` está en `.gitignore` — nunca se sube a GitHub. Si prefieres, puedes usar un perfil de `~/.aws/credentials` en lugar de las variables de entorno.
+## Despliegue
 
-## Uso
+Desde `Terraform/`, proporciona una contraseña de al menos 12 caracteres usando solo letras, números o `_@%+=:,.!-`:
+
+```powershell
+$env:TF_VAR_db_password = "Cambia-Esta-Clave-2026"
+tofu init
+tofu plan
+tofu apply
+```
+
+`tofu apply` crea ambas EC2. AWS ejecuta un cloud-init distinto en cada una durante su primer arranque. El comando puede finalizar antes de que Maven y npm terminen.
+
+Obtén la URL con:
+
+```powershell
+tofu output -raw application_url
+```
+
+## Comprobar cloud-init
+
+En cada instancia:
 
 ```bash
-# 1. Inicializar (descarga providers y conecta el backend S3)
-tofu init
+cloud-init status --wait
+sudo tail -n 200 /var/log/cloud-init-output.log
+```
 
-# 2. Revisar el plan de cambios
-tofu plan
+En el backend:
 
-# 3. Aplicar la infraestructura
-tofu apply
+```bash
+sudo systemctl status postgresql
+sudo systemctl status globomatics-backend
+sudo journalctl -u globomatics-backend -n 100 --no-pager
+```
 
-# 4. (opcional) Destruir todo al terminar el laboratorio
+En el frontend:
+
+```bash
+sudo systemctl status nginx
+sudo nginx -t
+```
+
+## Variables principales
+
+| Variable | Default | Descripción |
+|---|---|---|
+| `region_server` | `sa-east-1` | Región AWS |
+| `key_name` | `pk-lab2-ecommerce` | Key pair para SSH |
+| `ssh_cidr` | `168.228.132.62/32` | Red autorizada para SSH |
+| `backend_instance_type` | `t3.micro` | Tamaño de la EC2 backend |
+| `frontend_instance_type` | `t3.micro` | Tamaño de la EC2 frontend |
+| `repository_url` | Repositorio Globomatics | Repositorio clonado por cloud-init |
+| `repository_branch` | `practico07` | Rama desplegada |
+| `db_password` | Sin default | Contraseña sensible de PostgreSQL |
+
+El backend crea 1 GiB de swap para reducir fallos de memoria durante la compilación en `t3.micro`. Si el servicio queda sin memoria durante el uso normal, cambia solo el backend:
+
+```powershell
+tofu apply -var="backend_instance_type=t3.small"
+```
+
+## Actualizaciones y limpieza
+
+`user_data_replace_on_change = true` hace que cambiar una plantilla cloud-init reemplace la EC2 correspondiente. Cloud-init está pensado para el aprovisionamiento inicial; no sustituye un pipeline de despliegue continuo.
+
+```powershell
 tofu destroy
 ```
 
-Los outputs (IP pública, IP privada e ID de las instancias) se muestran al final del `apply` y también con:
-
-```bash
-tofu output
-```
-
-## Variables
-
-| Variable | Descripción | Default |
-|---|---|---|
-| `region_server` | Región de AWS donde se crean los recursos | `sa-east-1` |
-| `key_name` | Nombre del key pair existente en AWS para SSH | `pk-lab2-ecommerce` |
-| `ssh_cidr` | CIDR desde el cual se permite SSH de administración | `168.228.132.62/32` |
-
-## Outputs
-
-| Output | Descripción |
-|---|---|
-| `svr_backend_globomatic_id` | ID de la instancia EC2 Backend |
-| `svr_backend_globomatic_public_ip` | IP pública de la instancia Backend |
-| `svr_backend_globomatic_private_ip` | IP privada de la instancia Backend |
-| `svr_frontend_globomatic_id` | ID de la instancia EC2 Frontend |
-| `svr_frontend_globomatic_public_ip` | IP pública de la instancia Frontend |
+Al destruir o reemplazar el backend se elimina también PostgreSQL y sus datos porque se encuentran en el volumen raíz. Para información persistente de producción se recomienda un volumen EBS independiente o Amazon RDS.
 
 ## Seguridad
 
-- El SSH está restringido a una única IP (`var.ssh_cidr`); cambia tu IP desde `variables.tf` o con `-var="ssh_cidr=x.x.x.x/32"`
-- El frontend solo expone HTTP/HTTPS públicamente; el backend solo es accesible desde el frontend (8080) y por SSH
-- IMDSv2 obligatorio: las instancias no pueden leer metadatos sin token
-- Todos los recursos se etiquetan automáticamente vía `default_tags` del provider
-- Las credenciales nunca se versionan (`env.tf` ignorado, secretos por variables de entorno)
+- No guardes `TF_VAR_db_password` en Git.
+- El valor sensible existe en el estado remoto; limita el acceso al bucket y mantenlo cifrado.
+- El backend obtiene el secreto mediante un Instance Role limitado a `/globomatics/database/password`.
+- El puerto 8080 solo acepta tráfico del Security Group del frontend.
+- El puerto 5432 no se abre.
+- IMDSv2 es obligatorio en ambas instancias.

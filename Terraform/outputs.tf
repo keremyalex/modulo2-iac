@@ -23,3 +23,8 @@ output "svr_frontend_globomatic_public_ip" {
   description = "IP publica de la instancia EC2 Frontend"
   value       = aws_instance.svr_frontend_globomatic.public_ip
 }
+
+output "application_url" {
+  description = "URL publica de la aplicacion Globomatics"
+  value       = "http://${aws_instance.svr_frontend_globomatic.public_ip}"
+}

@@ -43,9 +43,9 @@ La conexión a la base de datos se define en `backend/src/main/resources/applica
 
 | Propiedad | Descripción |
 |---|---|
-| `spring.datasource.url` | `jdbc:postgresql://localhost:5432/asistenciadiplomado` |
-| `spring.datasource.username` | Usuario de PostgreSQL |
-| `spring.datasource.password` | Contraseña de PostgreSQL |
+| `spring.datasource.url` | Variable `SPRING_DATASOURCE_URL` (por defecto `jdbc:postgresql://localhost:5432/asistenciadiplomado`) |
+| `spring.datasource.username` | Variable `SPRING_DATASOURCE_USERNAME` (por defecto `globomatics_app`) |
+| `spring.datasource.password` | Variable obligatoria `SPRING_DATASOURCE_PASSWORD` |
 | `server.port` | Puerto del servidor (8080) |
 | `spring.jpa.hibernate.ddl-auto` | `update` — el schema lo gestiona Hibernate (sin Flyway) |
 

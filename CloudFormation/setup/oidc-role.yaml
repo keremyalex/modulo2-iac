@@ -5,7 +5,7 @@ Parameters:
   GitHubRepo:
     Description: Repositorio GitHub autorizado (owner/repo)
     Type: String
-    Default: GalvanNelson/Globomatics
+    Default: keremyalex/modulo2-iac
     AllowedPattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
     ConstraintDescription: Formato owner/repo
   GitHubBranch:
