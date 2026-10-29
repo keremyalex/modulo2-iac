@@ -45,7 +45,7 @@ PostgreSQL :5432 (localhost)
 - OpenTofu 1.5 o superior.
 - Credenciales AWS configuradas mediante AWS CLI, variables de entorno o un perfil.
 - Key pair `pk-lab2-ecommerce` en `sa-east-1`, o cambiar `key_name`.
-- Bucket `globomatic-tfstate-estado` con versionado y cifrado habilitados.
+- Bucket `globomatic-tfstate-441214868241-sa-east-1` con versionado y cifrado habilitados.
 - Tabla DynamoDB `terraform-state-lock` con partition key `LockID` de tipo String.
 - La rama indicada por `repository_branch` debe existir en GitHub y el repositorio debe ser accesible por HTTPS.
 
