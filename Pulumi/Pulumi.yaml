@@ -1,0 +1,20 @@
+name: globomatics-pm
+description: Globomatics en AWS con Pulumi, TypeScript y cloud-init
+runtime: nodejs
+backend:
+  url: s3://globomatic-tfstate-441214868241-sa-east-1/pulumi
+config:
+  aws:region:
+    value: sa-east-1
+  globomatics-pm:keyName:
+    default: pk-lab2-ecommerce
+  globomatics-pm:sshCidr:
+    default: 168.228.132.62/32
+  globomatics-pm:repositoryUrl:
+    default: https://github.com/keremyalex/modulo2-iac.git
+  globomatics-pm:repositoryBranch:
+    default: practico07
+  globomatics-pm:backendInstanceType:
+    default: t3.micro
+  globomatics-pm:frontendInstanceType:
+    default: t3.micro

@@ -1,7 +1,0 @@
-name: pulumi-ec2
-description: Mi primera instancia EC2 con TypeScript
-runtime: nodejs
-config:
-  pulumi:tags:
-    value:
-      pulumi:template: aws-typescript

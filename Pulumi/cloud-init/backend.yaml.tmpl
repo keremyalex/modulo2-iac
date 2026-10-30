@@ -1,0 +1,152 @@
+#cloud-config
+package_update: true
+
+packages:
+  - git
+  - java-17-amazon-corretto-devel
+  - maven
+  - postgresql16
+  - postgresql16-server
+
+write_files:
+  - path: /etc/systemd/system/globomatics-backend.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Globomatics Spring Boot backend
+      Wants=network-online.target
+      After=network-online.target postgresql.service
+      Requires=postgresql.service
+
+      [Service]
+      Type=simple
+      User=globomatics
+      Group=globomatics
+      WorkingDirectory=/opt/globomatics-app
+      EnvironmentFile=/etc/globomatics/backend.env
+      ExecStart=/usr/bin/java -Xms128m -Xmx384m -jar /opt/globomatics-app/backend.jar
+      Restart=always
+      RestartSec=10
+      SuccessExitStatus=143
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /usr/local/sbin/bootstrap-globomatics-backend.sh
+    permissions: '0750'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      readonly REPOSITORY_URL='@@REPOSITORY_URL@@'
+      readonly REPOSITORY_BRANCH='@@REPOSITORY_BRANCH@@'
+      readonly DB_PARAMETER_NAME='@@DB_PARAMETER_NAME@@'
+      readonly AWS_REGION='@@AWS_REGION@@'
+      readonly SOURCE_DIR='/opt/globomatics-source'
+      readonly APP_DIR='/opt/globomatics-app'
+      readonly APP_USER='globomatics'
+      readonly DB_USER='globomatics_app'
+      readonly DB_NAME='asistenciadiplomado'
+      readonly PG_DATA='/var/lib/pgsql/data'
+
+      if ! id "$APP_USER" >/dev/null 2>&1; then
+        useradd --system --create-home --home-dir /var/lib/globomatics --shell /sbin/nologin "$APP_USER"
+      fi
+
+      # Una t3.micro tiene poca memoria para Maven, Java y PostgreSQL.
+      if ! swapon --show=NAME --noheadings | grep -qx '/swapfile'; then
+        if [[ ! -f /swapfile ]]; then
+          fallocate -l 1G /swapfile
+          chmod 600 /swapfile
+          mkswap /swapfile
+        fi
+        swapon /swapfile
+      fi
+      grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+      if [[ ! -s "$PG_DATA/PG_VERSION" ]]; then
+        postgresql-setup --initdb --unit postgresql
+      fi
+
+      cat > "$PG_DATA/pg_hba.conf" <<'PGHBA'
+      local   all   all                 peer
+      host    all   all   127.0.0.1/32  scram-sha-256
+      host    all   all   ::1/128       scram-sha-256
+      PGHBA
+
+      if ! grep -q '^# Globomatics settings' "$PG_DATA/postgresql.conf"; then
+        cat >> "$PG_DATA/postgresql.conf" <<'PGCONF'
+
+      # Globomatics settings
+      listen_addresses = 'localhost'
+      password_encryption = 'scram-sha-256'
+      PGCONF
+      fi
+
+      chown postgres:postgres "$PG_DATA/pg_hba.conf" "$PG_DATA/postgresql.conf"
+      chmod 600 "$PG_DATA/pg_hba.conf" "$PG_DATA/postgresql.conf"
+      systemctl enable --now postgresql
+
+      DB_PASSWORD=''
+      for attempt in {1..24}; do
+        if DB_PASSWORD="$(aws ssm get-parameter \
+          --name "$DB_PARAMETER_NAME" \
+          --with-decryption \
+          --region "$AWS_REGION" \
+          --query 'Parameter.Value' \
+          --output text 2>/dev/null)"; then
+          break
+        fi
+        sleep 5
+      done
+
+      if [[ -z "$DB_PASSWORD" || "$DB_PASSWORD" == 'None' ]]; then
+        echo "No se pudo leer $DB_PARAMETER_NAME desde Parameter Store" >&2
+        exit 1
+      fi
+
+      escaped_password="$(printf '%s' "$DB_PASSWORD" | sed "s/'/''/g")"
+      if ! runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'" | grep -q 1; then
+        runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "CREATE ROLE $DB_USER LOGIN"
+      fi
+      runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "ALTER ROLE $DB_USER PASSWORD '$escaped_password'"
+
+      if ! runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1; then
+        runuser -u postgres -- createdb --owner="$DB_USER" "$DB_NAME"
+      fi
+
+      if [[ ! -d "$SOURCE_DIR/.git" ]]; then
+        rm -rf "$SOURCE_DIR"
+        git clone --depth 1 --branch "$REPOSITORY_BRANCH" "$REPOSITORY_URL" "$SOURCE_DIR"
+      fi
+      chown -R "$APP_USER:$APP_USER" "$SOURCE_DIR"
+
+      runuser -u "$APP_USER" -- mvn \
+        --batch-mode \
+        --file "$SOURCE_DIR/backend/pom.xml" \
+        -DskipTests \
+        clean package
+
+      jar_path="$(find "$SOURCE_DIR/backend/target" -maxdepth 1 -type f -name '*.jar' ! -name '*.original' | head -n 1)"
+      if [[ -z "$jar_path" ]]; then
+        echo 'Maven no genero el JAR del backend' >&2
+        exit 1
+      fi
+
+      install -d -o "$APP_USER" -g "$APP_USER" -m 0755 "$APP_DIR"
+      install -o "$APP_USER" -g "$APP_USER" -m 0644 "$jar_path" "$APP_DIR/backend.jar"
+      install -d -o root -g "$APP_USER" -m 0750 /etc/globomatics
+      umask 0077
+      {
+        printf 'SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/%s\n' "$DB_NAME"
+        printf 'SPRING_DATASOURCE_USERNAME=%s\n' "$DB_USER"
+        printf 'SPRING_DATASOURCE_PASSWORD=%s\n' "$DB_PASSWORD"
+      } > /etc/globomatics/backend.env
+      chown root:"$APP_USER" /etc/globomatics/backend.env
+      chmod 0640 /etc/globomatics/backend.env
+
+      systemctl daemon-reload
+      systemctl enable --now globomatics-backend
+
+runcmd:
+  - [bash, /usr/local/sbin/bootstrap-globomatics-backend.sh]

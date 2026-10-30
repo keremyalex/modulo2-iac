@@ -1,6 +1,9 @@
 {
-    "name": "pulumi-ec2",
+    "name": "globomatics-pm",
     "main": "index.ts",
+    "scripts": {
+        "typecheck": "tsc --noEmit"
+    },
     "devDependencies": {
         "@types/node": "^18",
         "typescript": "^5.0.0"

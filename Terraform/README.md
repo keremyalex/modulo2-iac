@@ -4,8 +4,8 @@ Infraestructura como código para crear dos instancias EC2 con Amazon Linux 2023
 
 ## Arquitectura
 
-- `backend-globomatic` (`t3.micro` por defecto): PostgreSQL 16 nativo, Java 17, Maven y Spring Boot en el puerto 8080.
-- `frontend-globomatic` (`t3.micro` por defecto): Node.js 22 para compilar React y Nginx para servirlo por HTTP.
+- `backend-tf-globomatic` (`t3.micro` por defecto): PostgreSQL 16 nativo, Java 17, Maven y Spring Boot en el puerto 8080.
+- `frontend-tf-globomatic` (`t3.micro` por defecto): Node.js 22 para compilar React y Nginx para servirlo por HTTP.
 - Nginx envía las solicitudes `/api` a la IP privada del backend.
 - PostgreSQL solo escucha en `localhost`; el puerto 5432 no se expone en AWS.
 - La contraseña de PostgreSQL se guarda como `SecureString` en Systems Manager Parameter Store.

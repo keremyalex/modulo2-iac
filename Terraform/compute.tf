@@ -25,7 +25,7 @@ resource "aws_instance" "svr_backend_globomatic" {
   }
 
   tags = {
-    Name = "backend-globomatic"
+    Name = "backend-tf-globomatic"
   }
 }
 
@@ -49,6 +49,6 @@ resource "aws_instance" "svr_frontend_globomatic" {
   }
 
   tags = {
-    Name = "frontend-globomatic"
+    Name = "frontend-tf-globomatic"
   }
 }
