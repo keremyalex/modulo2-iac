@@ -1,158 +1,156 @@
-# Globomatics — Infraestructura con AWS CloudFormation
+# Globomatics con AWS CloudFormation
 
-Infraestructura como código (IaC) para desplegar la topología de red y los servidores de **Globomatics** utilizando **CloudFormation con stacks anidados** (nested stacks) y un pipeline automatizado de CI/CD mediante **GitHub Actions con autenticación OIDC**.
+Implementación funcional de Globomatics con stacks anidados, cloud-init y recursos independientes de OpenTofu y Pulumi.
 
----
-## Estructura del proyecto
+## Arquitectura
 
-```
-.
-├── .github/
-│   └── workflows/
-│       └── deploy-cloudformation.yml  # Pipeline CI/CD automatizado
-├── CloudFormation/
-│   ├── template.yaml                  # Raíz: orquesta los 3 stacks anidados
-│   ├── templates/
-│   │   ├── network.yaml               # Red: VPC, subred pública, IGW, rutas, SG
-│   │   ├── backend.yaml               # Instancia EC2 Backend
-│   │   └── frontend.yaml              # Instancia EC2 Frontend
-│   ├── setup/
-│   │   └── oidc-role.yaml             # Bootstrap: bucket S3, OIDC provider y rol IAM
-│   └── .gitignore                     # Ignora *.pem y packaged.yaml
-└── README.md
+```text
+Internet
+   |
+   v
+frontend-cf-globomatic :80
+   |
+   | /api por la VPC CloudFormation
+   v
+backend-cf-globomatic :8080
+   |
+   v
+PostgreSQL :5432 (localhost)
 ```
 
-## Qué despliega
+- El frontend usa React y Nginx.
+- El backend usa Java 17, Maven, Spring Boot y PostgreSQL 16 nativo.
+- PostgreSQL no se expone en AWS.
+- El puerto 8080 solo acepta tráfico de `frontend-cf-sg`.
+- La contraseña se obtiene del SecureString `/globomatics/cf/database/password`.
+- La VPC `10.70.0.0/16` es exclusiva de CloudFormation.
 
-| Template | Recursos | Descripción |
-|---|---|---|
-| `template.yaml` | 3 `AWS::CloudFormation::Stack` | Pasa parámetros y conecta los outputs de red con las instancias |
-| `templates/network.yaml` | 8 | VPC `10.0.0.0/16`, subred pública `10.0.1.0/24`, Internet Gateway, tabla de rutas con salida `0.0.0.0/0` y Security Group (HTTP 80 abierto, SSH 22 restringido) |
-| `templates/backend.yaml` | 1 | EC2 `t3.micro` con Amazon Linux 2023 — `Globomatics-Backend` |
-| `templates/frontend.yaml` | 1 | EC2 `t3.micro` con Amazon Linux 2023 — `Globomatics-Frontend` |
+## Estructura
 
-Las instancias se conectan a la red mediante outputs de la raíz:
+| Archivo | Responsabilidad |
+|---|---|
+| `template.yaml` | Stack raíz y conexión de outputs/parameters |
+| `templates/network.yaml` | VPC, subred, rutas y Security Groups |
+| `templates/backend.yaml` | IAM, EC2 backend y cloud-init |
+| `templates/frontend.yaml` | EC2 frontend y cloud-init |
+| `git-sync-deployment.yaml` | Parámetros para CloudFormation Git Sync |
+| `setup/oidc-role.yaml` | Bucket y rol opcional para GitHub Actions |
 
-```yaml
-SubnetId: !GetAtt NetworkStack.Outputs.PublicSubnetId
-SecurityGroupId: !GetAtt NetworkStack.Outputs.WebSecurityGroupId
+## Contraseña PostgreSQL
+
+CloudFormation no permite crear directamente un `AWS::SSM::Parameter` de tipo `SecureString`. Por eso el parámetro se crea una vez antes del stack:
+
+```powershell
+$dbPassword = Read-Host -MaskInput "Contraseña PostgreSQL CloudFormation"
+
+aws ssm put-parameter `
+  --name "/globomatics/cf/database/password" `
+  --type "SecureString" `
+  --value $dbPassword `
+  --overwrite `
+  --region "sa-east-1"
+
+Remove-Variable dbPassword
 ```
 
-## Parámetros
+Puede usarse la misma contraseña de los otros despliegues, aunque cada implementación tiene su propia base de datos.
 
-| Parámetro | Default | Descripción |
-|---|---|---|
-| `KeyName` | `pk-lab2-ecommerce` | Key Pair existente en AWS para SSH (se usa en ambas instancias) |
-| `SSHLocation` | `0.0.0.0/0` | CIDR autorizado para SSH. **Usa siempre tu IP**: `<tu-ip>/32` |
-| `InstanceType` | `t3.micro` | Tipo de instancia para Backend y Frontend (`t3.micro`/`t3.small`/`t3.medium`) |
-| `VpcCidr` (en `network.yaml`) | `10.0.0.0/16` | Bloque CIDR de la VPC |
-| `SubnetCidr` (en `network.yaml`) | `10.0.1.0/24` | Bloque CIDR de la subred pública |
+## Despliegue local con AWS CLI
 
-## Outputs
+El usuario que ejecuta el despliegue necesita permisos de CloudFormation, como mínimo para `ValidateTemplate`, stacks, change sets, descripciones y eventos. También necesita los permisos EC2/IAM/SSM/S3 correspondientes a los recursos del template. Si aparece `AccessDenied` para `cloudformation:ValidateTemplate`, ese permiso aún debe agregarse al usuario.
 
-`VpcId`, `BackendPublicIP`, `FrontendPublicIP`, `BackendInstanceId`, `FrontendInstanceId`.
+Se puede reutilizar el bucket existente para subir las plantillas anidadas:
 
-## Despliegue
+```powershell
+cd CloudFormation
 
-`TemplateURL` de los stacks anidados apunta a rutas relativas (`./templates/*.yaml`), que **deben subirse a S3**. El comando `aws cloudformation package` los sube automáticamente y genera un template empaquetado.
-
-```bash
-cd CloudFormation/
-
-# 1. Empaquetar: sube templates/ a S3 y genera packaged.yaml
-aws cloudformation package \
-  --template-file template.yaml \
-  --s3-bucket <bucket-artefactos> \
-  --output-template-file packaged.yaml
-
-# 2. Desplegar
-aws cloudformation deploy \
-  --stack-name globomatics \
-  --template-file packaged.yaml \
-  --parameter-overrides \
-       KeyName=pk-lab2-ecommerce \
-       SSHLocation=<tu-ip>/32 \
-       InstanceType=t3.micro
+aws cloudformation package `
+  --template-file "template.yaml" `
+  --s3-bucket "globomatic-tfstate-441214868241-sa-east-1" `
+  --s3-prefix "cloudformation/globomatics-cf" `
+  --output-template-file "packaged.yaml" `
+  --region "sa-east-1"
 ```
 
-Ver el estado:
+Desplegar:
 
-```bash
-aws cloudformation describe-stacks --stack-name globomatics \
-  --query 'Stacks[0].Outputs'
+```powershell
+aws cloudformation deploy `
+  --stack-name "globomatics-cf" `
+  --template-file "packaged.yaml" `
+  --parameter-overrides `
+    KeyName="pk-lab2-ecommerce" `
+    SSHLocation="TU_IP_PUBLICA/32" `
+    BackendInstanceType="t3.micro" `
+    FrontendInstanceType="t3.micro" `
+    RepositoryBranch="practico07" `
+  --capabilities "CAPABILITY_NAMED_IAM" `
+  --region "sa-east-1"
 ```
 
-## Despliegue automático (CI/CD con GitHub Actions)
+## Outputs y prueba
 
-Al hacer `push` a `main` con cambios en `CloudFormation/**`, el workflow
-`.github/workflows/deploy-cloudformation.yml` empaqueta y despliega el stack solo.
-Usa **OIDC**: no hay claves de AWS en GitHub, solo un rol IAM de corta duración.
-
-```
-push a main (CloudFormation/**)
-  → checkout
-  → asume rol IAM vía OIDC (token de GitHub)
-  → aws cloudformation package  (sube templates/ al bucket de artefactos)
-  → aws cloudformation deploy   (crea/actualiza el stack globomatics)
+```powershell
+aws cloudformation describe-stacks `
+  --stack-name "globomatics-cf" `
+  --region "sa-east-1" `
+  --query "Stacks[0].Outputs" `
+  --output table
 ```
 
-### 1. Bootstrap (una sola vez, desde tu CLI con credenciales)
+Obtener la URL:
 
-```bash
-cd CloudFormation/
+```powershell
+$url = aws cloudformation describe-stacks `
+  --stack-name "globomatics-cf" `
+  --region "sa-east-1" `
+  --query "Stacks[0].Outputs[?OutputKey=='ApplicationUrl'].OutputValue" `
+  --output text
 
-aws cloudformation deploy \
-  --stack-name globomatics-oidc \
-  --template-file setup/oidc-role.yaml \
-  --capabilities CAPABILITY_IAM
+curl.exe -i --max-time 20 "$url/api/admin/modulos"
 ```
 
-Crea el bucket de artefactos, el proveedor OIDC de GitHub y el rol de despliegue.
-Parámetros opcionales: `GitHubRepo`, `GitHubBranch`, `ArtifactBucketName` y
-`CreateOidcProvider=false` si el proveedor OIDC ya existe en la cuenta.
+CloudFormation puede terminar antes que Maven y npm. Si la aplicación todavía no responde, espera unos minutos y revisa `/var/log/cloud-init-output.log` por SSH.
 
-Luego copia los outputs:
+## Git Sync
 
-```bash
-aws cloudformation describe-stacks --stack-name globomatics-oidc \
-  --query 'Stacks[0].Outputs'
+Los stacks anidados necesitan URLs S3. Por eso Git Sync debe vigilar el archivo generado `CloudFormation/packaged.yaml`, no el `template.yaml` con rutas locales.
+
+Flujo:
+
+1. Ejecutar `aws cloudformation package`.
+2. Confirmar `CloudFormation/packaged.yaml` en Git.
+3. Subirlo junto con `CloudFormation/git-sync-deployment.yaml`.
+4. En CloudFormation elegir **Create stack → Sync from Git**.
+5. Conectar el repositorio `keremyalex/modulo2-iac` y la rama `practico07`.
+6. Seleccionar **I am providing my own file**.
+7. Usar `CloudFormation/git-sync-deployment.yaml` como deployment file.
+8. Permitir que AWS cree el rol de Git Sync o seleccionar uno con permisos suficientes. Para estos stacks anidados, el rol también debe poder leer los templates del bucket S3.
+
+Cuando cambie un template anidado se debe volver a ejecutar `package` y confirmar el nuevo `packaged.yaml`; ese cambio es el que Git Sync detecta.
+
+## GitHub Actions opcional
+
+El workflow `.github/workflows/deploy-cloudformation.yml` ofrece una alternativa a Git Sync. Empaqueta y despliega usando OIDC. El bootstrap `setup/oidc-role.yaml` crea el bucket, proveedor y rol necesarios.
+
+Git Sync y GitHub Actions son mecanismos alternativos: para evitar dos despliegues simultáneos sobre el mismo stack, usa uno solo durante la demostración.
+
+## Eliminación
+
+```powershell
+aws cloudformation delete-stack `
+  --stack-name "globomatics-cf" `
+  --region "sa-east-1"
+
+aws cloudformation wait stack-delete-complete `
+  --stack-name "globomatics-cf" `
+  --region "sa-east-1"
 ```
 
-### 2. Variables y secretos en GitHub
+La red y las EC2 se eliminan con el stack. El SecureString fue creado externamente y se elimina aparte:
 
-En **Settings → Secrets and variables → Actions**:
-
-| Tipo | Nombre | Ejemplo |
-|---|---|---|
-| Secret | `AWS_ROLE_ARN` | output `RoleArn` |
-| Secret | `CF_SSH_LOCATION` | `<tu-ip>/32` |
-| Variable | `CF_ARTIFACTS_BUCKET` | output `ArtifactBucketName` |
-| Variable | `AWS_REGION` | `sa-east-1` |
-| Variable | `CF_STACK_NAME` | `globomatics` |
-| Variable | `CF_KEY_NAME` | `pk-lab2-ecommerce` |
-| Variable | `CF_INSTANCE_TYPE` | `t3.micro` |
-
-### 3. Primer despliegue
-
-Haz commit y push a `main` (o dispara el workflow con **Run workflow** desde la
-pestaña Actions). Si el stack no existe lo crea; si no hay cambios termina en
-no-op. Revisa el resultado en la pestaña **Actions** del repositorio.
-
-> Si cambias de IP, actualiza `CF_SSH_LOCATION`; si cambias el nombre del bucket
-> o el rol, actualiza `CF_ARTIFACTS_BUCKET` / `AWS_ROLE_ARN`.
-
-## Políticas de retención
-
-- **Red (`network.yaml`)**: los 8 recursos tienen `DeletionPolicy: Retain` y `UpdateReplacePolicy: Retain`, por lo que **sobreviven al borrado del stack** (VPC, subred, IGW, rutas y SG no tienen costo fijo).
-- **EC2 (`backend.yaml`, `frontend.yaml`)**: sin política → se **eliminan** con el stack para no dejar instancias huérfanas facturando.
-- **Stacks raíz**: sin política → se borran en cascada.
-
-> Nota: como la red retenida ya no pertenece a ningún stack, un siguiente `deploy` crea una red **nueva**; la anterior queda como recurso huérfano (sin costo) que puedes eliminar manualmente desde la consola si ya no la necesitas.
-
-## Limpieza
-
-```bash
-# Borra instancias y stacks (la red se conserva por la política Retain)
-aws cloudformation delete-stack --stack-name globomatics
-aws cloudformation wait stack-delete-complete --stack-name globomatics
+```powershell
+aws ssm delete-parameter `
+  --name "/globomatics/cf/database/password" `
+  --region "sa-east-1"
 ```

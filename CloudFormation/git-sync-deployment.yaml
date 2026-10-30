@@ -1,0 +1,13 @@
+template-file-path: CloudFormation/packaged.yaml
+parameters:
+  KeyName: pk-lab2-ecommerce
+  SSHLocation: 158.172.226.238/32
+  BackendInstanceType: t3.micro
+  FrontendInstanceType: t3.micro
+  RepositoryUrl: https://github.com/keremyalex/modulo2-iac.git
+  RepositoryBranch: practico07
+  DatabaseParameterName: /globomatics/cf/database/password
+tags:
+  Project: globomatic
+  ManagedBy: CloudFormationGitSync
+  Variant: cf

@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'sa-east-1' }}
-      STACK_NAME: ${{ vars.CF_STACK_NAME || 'globomatics' }}
+      STACK_NAME: ${{ vars.CF_STACK_NAME || 'globomatics-cf' }}
       ARTIFACTS_BUCKET: ${{ vars.CF_ARTIFACTS_BUCKET }}
     steps:
       - name: Checkout
@@ -44,6 +44,7 @@ jobs:
           aws cloudformation package \
             --template-file template.yaml \
             --s3-bucket "$ARTIFACTS_BUCKET" \
+            --s3-prefix "cloudformation/globomatics-cf" \
             --output-template-file packaged.yaml
 
       - name: Desplegar stack
@@ -55,6 +56,8 @@ jobs:
             --parameter-overrides \
               KeyName="${{ vars.CF_KEY_NAME || 'pk-lab2-ecommerce' }}" \
               SSHLocation="${{ secrets.CF_SSH_LOCATION }}" \
-              InstanceType="${{ vars.CF_INSTANCE_TYPE || 't3.micro' }}" \
-            --capabilities CAPABILITY_IAM \
+              BackendInstanceType="${{ vars.CF_BACKEND_INSTANCE_TYPE || 't3.micro' }}" \
+              FrontendInstanceType="${{ vars.CF_FRONTEND_INSTANCE_TYPE || 't3.micro' }}" \
+              RepositoryBranch="${{ vars.CF_REPOSITORY_BRANCH || 'practico07' }}" \
+            --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset

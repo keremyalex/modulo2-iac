@@ -1,41 +1,135 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Servidor Frontend de Globomatics (EC2).
+Description: Frontend Globomatics CloudFormation con React y Nginx.
 
 Parameters:
   KeyName:
-    Description: Nombre del Key Pair existente en AWS para acceder por SSH
     Type: AWS::EC2::KeyPair::KeyName
-    Default: pk-lab2-ecommerce
   InstanceType:
-    Description: Tipo de instancia EC2
     Type: String
-    Default: t3.micro
     AllowedValues: [t3.micro, t3.small, t3.medium]
   SubnetId:
-    Description: ID de la subred donde se lanza la instancia
     Type: AWS::EC2::Subnet::Id
   SecurityGroupId:
-    Description: ID del Security Group aplicado a la instancia
     Type: AWS::EC2::SecurityGroup::Id
+  BackendPrivateIp:
+    Type: String
+  RepositoryUrl:
+    Type: String
+  RepositoryBranch:
+    Type: String
 
 Resources:
   FrontendServer:
     Type: AWS::EC2::Instance
     Properties:
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
-      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
       SubnetId: !Ref SubnetId
       SecurityGroupIds:
         - !Ref SecurityGroupId
+      MetadataOptions:
+        HttpTokens: required
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #cloud-config
+            package_update: true
+
+            packages:
+              - git
+              - nginx
+              - nodejs22
+              - nodejs22-npm
+
+            write_files:
+              - path: /etc/nginx/nginx.conf
+                permissions: '0644'
+                content: |
+                  user nginx;
+                  worker_processes auto;
+                  error_log /var/log/nginx/error.log notice;
+                  pid /run/nginx.pid;
+
+                  events {
+                      worker_connections 1024;
+                  }
+
+                  http {
+                      include /etc/nginx/mime.types;
+                      default_type application/octet-stream;
+                      log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                                      '$status $body_bytes_sent "$http_referer" '
+                                      '"$http_user_agent" "$http_x_forwarded_for"';
+                      access_log /var/log/nginx/access.log main;
+                      sendfile on;
+                      keepalive_timeout 65;
+
+                      server {
+                          listen 80 default_server;
+                          listen [::]:80 default_server;
+                          server_name _;
+                          root /usr/share/nginx/html;
+                          index index.html;
+
+                          location / {
+                              try_files $uri $uri/ /index.html;
+                          }
+
+                          location /api/ {
+                              proxy_pass http://${BackendPrivateIp}:8080;
+                              proxy_http_version 1.1;
+                              proxy_set_header Host $host;
+                              proxy_set_header X-Real-IP $remote_addr;
+                              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                              proxy_set_header X-Forwarded-Proto $scheme;
+                          }
+                      }
+                  }
+
+              - path: /usr/local/sbin/bootstrap-globomatics-frontend.sh
+                permissions: '0750'
+                content: |
+                  #!/usr/bin/env bash
+                  set -euo pipefail
+
+                  readonly REPOSITORY_URL='${RepositoryUrl}'
+                  readonly REPOSITORY_BRANCH='${RepositoryBranch}'
+                  readonly SOURCE_DIR='/opt/globomatics-source'
+                  readonly WEB_ROOT='/usr/share/nginx/html'
+
+                  if [[ ! -d "$SOURCE_DIR/.git" ]]; then
+                    rm -rf "$SOURCE_DIR"
+                    git clone --depth 1 --branch "$REPOSITORY_BRANCH" "$REPOSITORY_URL" "$SOURCE_DIR"
+                  fi
+
+                  cd "$SOURCE_DIR/frontend"
+                  npm ci
+                  npm run build
+
+                  rm -rf "$WEB_ROOT"/*
+                  cp -a dist/. "$WEB_ROOT"/
+                  chown -R nginx:nginx "$WEB_ROOT"
+
+                  nginx -t
+                  systemctl enable --now nginx
+
+            runcmd:
+              - [bash, /usr/local/sbin/bootstrap-globomatics-frontend.sh]
       Tags:
         - Key: Name
-          Value: Globomatics-Frontend
+          Value: frontend-cf-globomatic
+        - Key: Project
+          Value: globomatic
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Variant
+          Value: cf
 
 Outputs:
-  PublicIp:
-    Description: IP Publica del servidor Frontend
-    Value: !GetAtt FrontendServer.PublicIp
   InstanceId:
-    Description: ID de la instancia Frontend
+    Description: ID del frontend CloudFormation
     Value: !Ref FrontendServer
+  PublicIp:
+    Description: IP publica del frontend
+    Value: !GetAtt FrontendServer.PublicIp

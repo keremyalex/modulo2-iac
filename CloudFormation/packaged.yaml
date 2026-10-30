@@ -1,0 +1,171 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Globomatics CF - orquesta red, backend y frontend mediante stacks
+  anidados.
+Parameters:
+  KeyName:
+    Description: Key Pair existente en AWS para acceder por SSH
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: pk-lab2-ecommerce
+  SSHLocation:
+    Description: CIDR autorizado para SSH
+    Type: String
+    Default: 158.172.226.238/32
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    ConstraintDescription: Debe tener formato CIDR, por ejemplo 203.0.113.10/32
+  BackendInstanceType:
+    Description: Tipo de instancia EC2 para el backend
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+    - t3.micro
+    - t3.small
+    - t3.medium
+  FrontendInstanceType:
+    Description: Tipo de instancia EC2 para el frontend
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+    - t3.micro
+    - t3.small
+    - t3.medium
+  RepositoryUrl:
+    Description: Repositorio HTTPS que clonara cloud-init
+    Type: String
+    Default: https://github.com/keremyalex/modulo2-iac.git
+    AllowedPattern: ^https://.*$
+  RepositoryBranch:
+    Description: Rama del repositorio que se desplegara
+    Type: String
+    Default: practico07
+    AllowedPattern: ^[A-Za-z0-9._/-]+$
+  DatabaseParameterName:
+    Description: Nombre del SecureString existente en Parameter Store
+    Type: String
+    Default: /globomatics/cf/database/password
+    AllowedPattern: ^/[A-Za-z0-9_.\-/]+$
+Resources:
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        https://s3.sa-east-1.amazonaws.com/globomatic-tfstate-441214868241-sa-east-1/cloudformation/globomatics-cf/5639745c9a0a3e608af8648142340e49.template
+      Parameters:
+        SSHLocation:
+          Ref: SSHLocation
+      Tags:
+      - Key: Project
+        Value: globomatic
+      - Key: ManagedBy
+        Value: CloudFormation
+      - Key: Variant
+        Value: cf
+  BackendStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        https://s3.sa-east-1.amazonaws.com/globomatic-tfstate-441214868241-sa-east-1/cloudformation/globomatics-cf/277373e6e5ed92f75e900385e33ee3c1.template
+      Parameters:
+        KeyName:
+          Ref: KeyName
+        InstanceType:
+          Ref: BackendInstanceType
+        SubnetId:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.PublicSubnetId
+        SecurityGroupId:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.BackendSecurityGroupId
+        DatabaseParameterName:
+          Ref: DatabaseParameterName
+        RepositoryUrl:
+          Ref: RepositoryUrl
+        RepositoryBranch:
+          Ref: RepositoryBranch
+      Tags:
+      - Key: Project
+        Value: globomatic
+      - Key: ManagedBy
+        Value: CloudFormation
+      - Key: Variant
+        Value: cf
+  FrontendStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        https://s3.sa-east-1.amazonaws.com/globomatic-tfstate-441214868241-sa-east-1/cloudformation/globomatics-cf/4eb0313f861ed18427152653efaa3375.template
+      Parameters:
+        KeyName:
+          Ref: KeyName
+        InstanceType:
+          Ref: FrontendInstanceType
+        SubnetId:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.PublicSubnetId
+        SecurityGroupId:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.FrontendSecurityGroupId
+        BackendPrivateIp:
+          Fn::GetAtt:
+          - BackendStack
+          - Outputs.PrivateIp
+        RepositoryUrl:
+          Ref: RepositoryUrl
+        RepositoryBranch:
+          Ref: RepositoryBranch
+      Tags:
+      - Key: Project
+        Value: globomatic
+      - Key: ManagedBy
+        Value: CloudFormation
+      - Key: Variant
+        Value: cf
+Outputs:
+  VpcId:
+    Description: VPC exclusiva del despliegue CloudFormation
+    Value:
+      Fn::GetAtt:
+      - NetworkStack
+      - Outputs.VpcId
+  BackendInstanceId:
+    Description: ID de la EC2 backend
+    Value:
+      Fn::GetAtt:
+      - BackendStack
+      - Outputs.InstanceId
+  BackendPublicIp:
+    Description: IP publica del backend
+    Value:
+      Fn::GetAtt:
+      - BackendStack
+      - Outputs.PublicIp
+  BackendPrivateIp:
+    Description: IP privada usada por Nginx
+    Value:
+      Fn::GetAtt:
+      - BackendStack
+      - Outputs.PrivateIp
+  FrontendInstanceId:
+    Description: ID de la EC2 frontend
+    Value:
+      Fn::GetAtt:
+      - FrontendStack
+      - Outputs.InstanceId
+  FrontendPublicIp:
+    Description: IP publica del frontend
+    Value:
+      Fn::GetAtt:
+      - FrontendStack
+      - Outputs.PublicIp
+  ApplicationUrl:
+    Description: URL publica de Globomatics CloudFormation
+    Value:
+      Fn::Sub:
+      - http://${FrontendIp}
+      - FrontendIp:
+          Fn::GetAtt:
+          - FrontendStack
+          - Outputs.PublicIp
